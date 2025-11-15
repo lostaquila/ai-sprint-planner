@@ -4,6 +4,7 @@ import BacklogClient from './BacklogClient';
 interface Ticket {
   id: string;
   title: string;
+  description?: string | null;
   type: string;
   priority: string;
   story_points: number | null;
@@ -15,16 +16,15 @@ export default async function Home() {
   
   const { data: tickets, error } = await supabase
     .from('tickets')
-    .select('id, title, type, priority, story_points, status')
-    .in('status', ['backlog', 'in_sprint'])
+    .select('id, title, description, type, priority, story_points, status')
     .order('created_at', { ascending: false });
 
   if (error) {
     console.error('Error fetching tickets:', error);
     return (
-      <div className="min-h-screen bg-zinc-50 dark:bg-black font-sans">
+      <div className="min-h-screen bg-slate-950 font-sans">
         <main className="min-h-screen py-8">
-          <div className="p-4 text-red-600">
+          <div className="p-4 text-red-400">
             Error loading tickets: {error.message}
           </div>
         </main>
@@ -33,7 +33,7 @@ export default async function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-black font-sans">
+    <div className="min-h-screen bg-slate-950 font-sans">
       <main className="min-h-screen py-8">
         <BacklogClient initialTickets={tickets || []} />
       </main>

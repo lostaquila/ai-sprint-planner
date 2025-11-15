@@ -1,15 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+
+interface Ticket {
+  id: string;
+  title: string;
+  description?: string | null;
+  type: string;
+  priority: string;
+  story_points: number | null;
+  status?: string;
+}
 
 interface TicketModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  initialTicket?: Ticket | null;
+  mode?: 'create' | 'edit';
 }
 
-export default function TicketModal({ isOpen, onClose, onSuccess }: TicketModalProps) {
+export default function TicketModal({ isOpen, onClose, onSuccess, initialTicket, mode = 'create' }: TicketModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
@@ -19,24 +31,63 @@ export default function TicketModal({ isOpen, onClose, onSuccess }: TicketModalP
     story_points: '',
   });
 
+  // Initialize form with initialTicket when in edit mode
+  useEffect(() => {
+    if (mode === 'edit' && initialTicket) {
+      setFormData({
+        title: initialTicket.title || '',
+        description: initialTicket.description || '',
+        type: initialTicket.type || '',
+        priority: initialTicket.priority || '',
+        story_points: initialTicket.story_points?.toString() || '',
+      });
+    } else {
+      // Reset form for create mode
+      setFormData({
+        title: '',
+        description: '',
+        type: '',
+        priority: '',
+        story_points: '',
+      });
+    }
+  }, [initialTicket, mode, isOpen]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
     try {
-      const { error } = await supabase
-        .from('tickets')
-        .insert([
-          {
+      if (mode === 'edit' && initialTicket) {
+        // Update existing ticket
+        const { error } = await supabase
+          .from('tickets')
+          .update({
             title: formData.title,
             description: formData.description,
             type: formData.type,
             priority: formData.priority,
             story_points: formData.story_points ? parseInt(formData.story_points) : null,
-          },
-        ]);
+          })
+          .eq('id', initialTicket.id);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        // Create new ticket
+        const { error } = await supabase
+          .from('tickets')
+          .insert([
+            {
+              title: formData.title,
+              description: formData.description,
+              type: formData.type,
+              priority: formData.priority,
+              story_points: formData.story_points ? parseInt(formData.story_points) : null,
+            },
+          ]);
+
+        if (error) throw error;
+      }
 
       // Reset form
       setFormData({
@@ -50,8 +101,8 @@ export default function TicketModal({ isOpen, onClose, onSuccess }: TicketModalP
       onClose();
       if (onSuccess) onSuccess();
     } catch (error) {
-      console.error('Error creating ticket:', error);
-      alert('Failed to create ticket. Please try again.');
+      console.error(`Error ${mode === 'edit' ? 'updating' : 'creating'} ticket:`, error);
+      alert(`Failed to ${mode === 'edit' ? 'update' : 'create'} ticket. Please try again.`);
     } finally {
       setIsSubmitting(false);
     }
@@ -63,7 +114,9 @@ export default function TicketModal({ isOpen, onClose, onSuccess }: TicketModalP
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold text-black dark:text-zinc-50">Create New Ticket</h2>
+          <h2 className="text-2xl font-bold text-black dark:text-zinc-50">
+            {mode === 'edit' ? 'Edit Ticket' : 'Create New Ticket'}
+          </h2>
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
@@ -162,7 +215,7 @@ export default function TicketModal({ isOpen, onClose, onSuccess }: TicketModalP
               disabled={isSubmitting}
               className="flex-1 px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? 'Creating...' : 'Create Ticket'}
+              {isSubmitting ? (mode === 'edit' ? 'Updating...' : 'Creating...') : (mode === 'edit' ? 'Update Ticket' : 'Create Ticket')}
             </button>
           </div>
         </form>
