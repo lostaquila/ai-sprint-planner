@@ -10,12 +10,12 @@ export async function POST(req: Request) {
         );
       }
   
-      const url = process.env.N8N_GENERATE_TICKETS_URL;
+      const url = process.env.NEXT_PUBLIC_N8N_GENERATE_TICKETS_URL;
   
       if (!url) {
-        console.error("N8N_GENERATE_TICKETS_URL is not set");
+        console.error("NEXT_PUBLIC_N8N_GENERATE_TICKETS_URL is not set");
         return new Response(
-          JSON.stringify({ error: "N8N_GENERATE_TICKETS_URL is not set" }),
+          JSON.stringify({ error: "NEXT_PUBLIC_N8N_GENERATE_TICKETS_URL is not set" }),
           { status: 500 }
         );
       }
