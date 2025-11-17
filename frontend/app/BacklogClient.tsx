@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import {
   DragDropContext,
   Droppable,
@@ -154,7 +155,15 @@ export default function BacklogClient({ initialTickets }: BacklogClientProps) {
     <div className="w-full max-w-6xl mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-slate-100">Tickets</h1>
-        <NewTicketModal />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/sprint"
+            className="px-4 py-2 bg-slate-800 text-slate-100 rounded-lg font-medium hover:bg-slate-700 transition-colors"
+          >
+            Plan Sprint
+          </Link>
+          <NewTicketModal />
+        </div>
       </div>
 
       {/* AI Generation Section */}

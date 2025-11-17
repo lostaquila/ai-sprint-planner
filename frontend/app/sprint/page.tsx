@@ -31,9 +31,10 @@ export default async function SprintPage() {
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-black font-sans">
-      <main className="w-full max-w-6xl mx-auto p-6">
-        <h1 className="text-3xl font-bold text-black dark:text-zinc-50 mb-6">Sprint Planning</h1>
-        
+      <main className="w-full max-w-4xl mx-auto p-6">
+        <h1 className="text-3xl font-bold text-black dark:text-zinc-50 mb-6">
+          Sprint Planning
+        </h1>
         <SprintPlanner backlogTickets={tickets || []} />
       </main>
     </div>
