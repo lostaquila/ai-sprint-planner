@@ -131,53 +131,195 @@ export default function SprintPlanner({ backlogTickets }: SprintPlannerProps) {
 
   const totalPoints = plannedSprint?.total_points ?? 0;
 
-  const handleStartSprint = async () => {
+  const generateSprintName = async (): Promise<string> => {
+    try {
+      // Get all existing sprints to determine the next sprint number
+      const { data: existingSprints, error } = await supabase
+        .from('sprints')
+        .select('id, name, created_at')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching sprints for name generation:', error);
+        // Fallback to date-based name if we can't fetch existing sprints
+        const now = new Date();
+        const month = now.toLocaleDateString('en-US', { month: 'short' });
+        const year = now.getFullYear();
+        return `Sprint – ${month} ${year}`;
+      }
+
+      // Try to extract sprint number from existing names
+      let maxSprintNumber = 0;
+      if (existingSprints && existingSprints.length > 0) {
+        existingSprints.forEach((sprint) => {
+          if (sprint.name) {
+            // Match patterns like "Sprint #1", "Sprint #123", etc.
+            const match = sprint.name.match(/Sprint\s*#(\d+)/i);
+            if (match) {
+              const sprintNum = parseInt(match[1], 10);
+              if (sprintNum > maxSprintNumber) {
+                maxSprintNumber = sprintNum;
+              }
+            }
+          }
+        });
+      }
+
+      // Generate name based on sprint number or date
+      if (maxSprintNumber > 0) {
+        return `Sprint #${maxSprintNumber + 1}`;
+      } else {
+        // Use date-based name for first sprint or if no numbered sprints exist
+        const now = new Date();
+        const month = now.toLocaleDateString('en-US', { month: 'short' });
+        const year = now.getFullYear();
+        return `Sprint – ${month} ${year}`;
+      }
+    } catch (err) {
+      console.error('Error generating sprint name:', err);
+      // Ultimate fallback
+      const now = new Date();
+      const month = now.toLocaleDateString('en-US', { month: 'short' });
+      const year = now.getFullYear();
+      return `Sprint – ${month} ${year}`;
+    }
+  };
+
+  const handleStartSprint = async (e?: React.MouseEvent<HTMLButtonElement>) => {
+    // Prevent default form submission if called from button
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    console.log('[handleStartSprint] Function called');
+    
     if (!plannedSprint || plannedSprint.tickets.length === 0) {
+      console.warn('[handleStartSprint] No tickets selected');
       alert('No tickets selected to start sprint');
       return;
     }
+
+    console.log('[handleStartSprint] Starting sprint creation with', {
+      ticketCount: plannedSprint.tickets.length,
+      totalPoints: plannedSprint.total_points,
+      capacity,
+    });
 
     setIsStarting(true);
     setError(null);
 
     try {
-      // Create a new sprint
+      // Step 1: Generate sprint name
+      console.log('[handleStartSprint] Step 1: Generating sprint name...');
+      const sprintName = await generateSprintName();
+      console.log('[handleStartSprint] Generated sprint name:', sprintName);
+
+      // Step 2: Create a new sprint
+      console.log('[handleStartSprint] Step 2: Creating sprint in Supabase...', {
+        name: sprintName,
+        capacity_points: capacity,
+      });
+      
       const { data: sprint, error: sprintError } = await supabase
         .from('sprints')
         .insert([
           {
-            capacity,
-            total_story_points: plannedSprint.total_points,
+            name: sprintName,
+            capacity_points: capacity,
           },
         ])
         .select()
         .single();
 
-      if (sprintError) throw sprintError;
-
-      if (!sprint) {
-        throw new Error('Failed to create sprint');
+      if (sprintError) {
+        console.error('[handleStartSprint] Sprint creation error:', sprintError);
+        throw sprintError;
       }
 
-      // Update all selected tickets to status = "in_sprint" and set sprint_id
+      if (!sprint) {
+        console.error('[handleStartSprint] Sprint creation returned no data');
+        throw new Error('Failed to create sprint: No sprint data returned');
+      }
+
+      console.log('[handleStartSprint] Sprint created successfully:', sprint);
+
+      // Step 3: Update all selected tickets
       const ticketIds = plannedSprint.tickets.map((ticket) => ticket.id);
-      const { error: updateError } = await supabase
+      console.log('[handleStartSprint] Step 3: Updating tickets...', {
+        ticketIds,
+        count: ticketIds.length,
+        sprintId: sprint.id,
+      });
+
+      const { error: updateError, data: updatedTickets } = await supabase
         .from('tickets')
         .update({
           status: 'in_sprint',
           sprint_id: sprint.id,
         })
-        .in('id', ticketIds);
+        .in('id', ticketIds)
+        .select();
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.error('[handleStartSprint] Ticket update error:', updateError);
+        throw updateError;
+      }
 
-      // Refresh the page
+      console.log('[handleStartSprint] Tickets updated successfully:', {
+        updatedCount: updatedTickets?.length || 0,
+        sprintId: sprint.id,
+      });
+
+      // Step 4: Success - update UI and refresh
+      console.log('[handleStartSprint] ✅ Sprint started successfully!', {
+        sprintId: sprint.id,
+        sprintName: sprint.name,
+        ticketsUpdated: ticketIds.length,
+      });
+
+      // Clear planned sprint state
+      setPlannedSprint(null);
+      
+      // Show success feedback (optional - could use a toast instead)
+      console.log('[handleStartSprint] Refreshing page...');
+      
+      // Refresh the page to show updated data
       router.refresh();
+      
+      // Optional: Small delay before refresh to ensure state updates are visible
+      setTimeout(() => {
+        console.log('[handleStartSprint] Page refresh complete');
+      }, 100);
+      
     } catch (error) {
-      console.error('Error starting sprint:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to start sprint. Please try again.';
+      console.error('[handleStartSprint] ❌ Error starting sprint:', error);
+      
+      // Enhanced error message extraction
+      let errorMessage = 'Failed to start sprint. Please try again.';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        console.error('[handleStartSprint] Error details:', {
+          message: error.message,
+          stack: error.stack,
+        });
+      } else if (typeof error === 'object' && error !== null) {
+        // Handle Supabase errors
+        if ('message' in error) {
+          errorMessage = String(error.message);
+        } else if ('code' in error) {
+          errorMessage = `Database error: ${String(error.code)}`;
+        }
+        console.error('[handleStartSprint] Error object:', error);
+      }
+      
       setError(errorMessage);
+      
+      // Keep the planned sprint so user can retry
+      // Don't clear plannedSprint on error
     } finally {
+      console.log('[handleStartSprint] Setting isStarting to false');
       setIsStarting(false);
     }
   };
@@ -315,9 +457,14 @@ export default function SprintPlanner({ backlogTickets }: SprintPlannerProps) {
                 {/* Start Sprint Button */}
                 <div className="mb-6 flex justify-end">
                   <button
-                    onClick={handleStartSprint}
+                    type="button"
+                    onClick={(e) => {
+                      console.log('[Start Sprint Button] Clicked');
+                      handleStartSprint(e);
+                    }}
                     disabled={isStarting || !plannedSprint || plannedSprint.tickets.length === 0}
                     className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-semibold hover:from-emerald-700 hover:to-teal-700 active:from-emerald-800 active:to-teal-800 transition-all duration-300 ease-out disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md hover:shadow-xl hover:scale-105 active:scale-95 hover:-translate-y-0.5 disabled:transform-none disabled:hover:shadow-md group"
+                    aria-label="Start sprint with selected tickets"
                   >
                     {isStarting ? (
                       <>
