@@ -294,8 +294,7 @@ export default function DocumentationPage() {
                     <tbody className="divide-y divide-indigo-200 dark:divide-indigo-800">
                       {[
                         { field: 'id', type: 'uuid', desc: 'Unique identifier' },
-                        { field: 'capacity', type: 'integer', desc: 'Sprint capacity in story points' },
-                        { field: 'total_story_points', type: 'integer', desc: 'Total story points in sprint' },
+                        { field: 'capacity_points', type: 'integer', desc: 'Sprint capacity in story points' },
                         { field: 'created_at', type: 'timestamp', desc: 'Creation timestamp' },
                         { field: 'updated_at', type: 'timestamp', desc: 'Last update timestamp' },
                       ].map((row) => (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   DragDropContext,
@@ -32,6 +32,11 @@ export default function BacklogClient({ initialTickets }: BacklogClientProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [isExtractingPdf, setIsExtractingPdf] = useState(false);
+  const [extractedPdfText, setExtractedPdfText] = useState<string>('');
+  const [pdfFileName, setPdfFileName] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const COLUMNS = [
     { id: 'backlog', title: 'Backlog' },
@@ -64,9 +69,173 @@ export default function BacklogClient({ initialTickets }: BacklogClientProps) {
     setTickets(initialTickets);
   }, [initialTickets]);
 
+  const extractTextFromPdf = async (file: File): Promise<string> => {
+    try {
+      console.log('[extractTextFromPdf] Starting PDF extraction for file:', file.name, file.size);
+      
+      // Dynamically import pdfjs-dist only on client side
+      const pdfjsLib = await import('pdfjs-dist');
+      console.log('[extractTextFromPdf] PDF.js library loaded, version:', pdfjsLib.version);
+      
+      // Set up PDF.js worker - pdfjs-dist v5.x uses ES modules
+      // Try different worker paths for compatibility
+      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        // For v5.x, worker files may be in different locations
+        // Try multiple CDN paths and file extensions
+        const workerPaths = [
+          `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`,
+          `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`,
+          `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`,
+          `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`,
+          `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`,
+        ];
+        
+        // Set to first option (will try to load it)
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerPaths[0];
+        console.log('[extractTextFromPdf] Worker URL set to:', workerPaths[0]);
+      }
+      
+      const arrayBuffer = await file.arrayBuffer();
+      console.log('[extractTextFromPdf] File array buffer created, size:', arrayBuffer.byteLength);
+      
+      // Load PDF document with optimized settings
+      // Try without worker first for better compatibility
+      let loadingTask;
+      try {
+        // First attempt: try with worker disabled for maximum compatibility
+        loadingTask = pdfjsLib.getDocument({
+          data: arrayBuffer,
+          useWorkerFetch: false,
+          isEvalSupported: false,
+          useSystemFonts: false,
+          verbosity: 0,
+        });
+        console.log('[extractTextFromPdf] Using worker-disabled mode');
+      } catch (configError) {
+        console.warn('[extractTextFromPdf] Worker-disabled config failed, trying basic config:', configError);
+        // Fallback: try with minimal configuration
+        loadingTask = pdfjsLib.getDocument({
+          data: arrayBuffer,
+        });
+        console.log('[extractTextFromPdf] Using basic configuration');
+      }
+      
+      const pdf = await loadingTask.promise;
+      console.log('[extractTextFromPdf] PDF loaded successfully, pages:', pdf.numPages);
+      
+      let fullText = '';
+
+      // Extract text from all pages
+      for (let i = 1; i <= pdf.numPages; i++) {
+        console.log(`[extractTextFromPdf] Extracting text from page ${i}/${pdf.numPages}`);
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item: any) => item.str || '')
+          .filter((str: string) => str.trim().length > 0)
+          .join(' ');
+        fullText += pageText + '\n\n';
+      }
+
+      const extractedText = fullText.trim();
+      console.log('[extractTextFromPdf] Text extraction complete, length:', extractedText.length);
+      
+      if (extractedText.length === 0) {
+        console.warn('[extractTextFromPdf] No text extracted from PDF - may be image-based or encrypted');
+        throw new Error('No text could be extracted from this PDF. The PDF may be image-based (scanned) or password-protected.');
+      }
+      
+      return extractedText;
+    } catch (err) {
+      console.error('[extractTextFromPdf] Error details:', err);
+      
+      // Provide more specific error messages
+      if (err instanceof Error) {
+        if (err.message.includes('Invalid PDF')) {
+          throw new Error('Invalid PDF file. Please ensure the file is a valid, unencrypted PDF.');
+        } else if (err.message.includes('password')) {
+          throw new Error('This PDF is password-protected. Please remove the password and try again.');
+        } else if (err.message.includes('worker')) {
+          throw new Error('PDF processing worker failed to load. Please try again or check your internet connection.');
+        } else {
+          throw new Error(`Failed to extract text from PDF: ${err.message}`);
+        }
+      }
+      
+      throw new Error('Failed to extract text from PDF. Please ensure the file is a valid PDF.');
+    }
+  };
+
+  const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setError('Please upload a valid PDF file');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('PDF file size must be less than 10MB');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    setPdfFile(file);
+    setPdfFileName(file.name);
+    setError(null);
+    setIsExtractingPdf(true);
+
+    try {
+      const extractedText = await extractTextFromPdf(file);
+      setExtractedPdfText(extractedText);
+      
+      // Append extracted text to existing spec
+      if (spec.trim()) {
+        setSpec((prev) => prev + '\n\n--- Extracted from PDF ---\n\n' + extractedText);
+      } else {
+        setSpec(extractedText);
+      }
+    } catch (err) {
+      console.error('Error processing PDF:', err);
+      setError(err instanceof Error ? err.message : 'Failed to process PDF');
+      setPdfFile(null);
+      setPdfFileName('');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } finally {
+      setIsExtractingPdf(false);
+    }
+  };
+
+  const handleRemovePdf = () => {
+    setPdfFile(null);
+    setPdfFileName('');
+    setExtractedPdfText('');
+    
+    // Remove PDF-extracted text from spec if it exists
+    if (extractedPdfText && spec.includes('--- Extracted from PDF ---')) {
+      const parts = spec.split('--- Extracted from PDF ---');
+      setSpec(parts[0].trim());
+    }
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleGenerateTickets = async () => {
-    if (!spec.trim()) {
-      setError('Please enter a spec');
+    const finalSpec = spec.trim();
+    if (!finalSpec) {
+      setError('Please enter a spec or upload a PDF');
       return;
     }
 
@@ -79,7 +248,7 @@ export default function BacklogClient({ initialTickets }: BacklogClientProps) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ spec }),
+        body: JSON.stringify({ spec: finalSpec }),
       });
 
       const data = await response.json();
@@ -91,6 +260,12 @@ export default function BacklogClient({ initialTickets }: BacklogClientProps) {
       // Success - refresh tickets
       await loadTickets();
       setSpec('');
+      setPdfFile(null);
+      setPdfFileName('');
+      setExtractedPdfText('');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     } catch (err) {
       console.error('Error generating tickets:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate tickets');
@@ -244,6 +419,67 @@ export default function BacklogClient({ initialTickets }: BacklogClientProps) {
           placeholder="Describe the features, bugs, or improvements you'd like to create tickets for..."
           className="w-full px-4 py-3 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 focus:border-indigo-500 dark:focus:border-indigo-400 resize-none mb-4 shadow-sm transition-all duration-200"
         />
+        
+        {/* PDF Upload Section */}
+        <div className="mb-4">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            onChange={handlePdfUpload}
+            className="hidden"
+            id="pdf-upload"
+            disabled={isExtractingPdf || isGenerating}
+          />
+          <label
+            htmlFor="pdf-upload"
+            className={`inline-flex items-center gap-2 px-4 py-2.5 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${
+              isExtractingPdf || isGenerating
+                ? 'border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                : 'border-indigo-300 dark:border-indigo-700 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:border-indigo-400 dark:hover:border-indigo-600 hover:bg-indigo-100 dark:hover:bg-indigo-950/50'
+            }`}
+          >
+            {isExtractingPdf ? (
+              <>
+                <div className="w-5 h-5 border-2 border-indigo-600 dark:border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-sm font-medium">Extracting text from PDF...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <span className="text-sm font-medium">+ Attach PDF (optional)</span>
+              </>
+            )}
+          </label>
+          
+          {/* PDF Preview/Remove */}
+          {pdfFileName && !isExtractingPdf && (
+            <div className="mt-3 flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-200 dark:border-emerald-800 rounded-xl">
+              <svg className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300 truncate">
+                  {pdfFileName}
+                </p>
+                <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                  {extractedPdfText ? `${extractedPdfText.split('\n').filter(line => line.trim()).length} lines extracted` : 'Processing...'}
+                </p>
+              </div>
+              <button
+                onClick={handleRemovePdf}
+                className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg transition-colors duration-200 hover:scale-110 active:scale-95"
+                title="Remove PDF"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={handleGenerateTickets}

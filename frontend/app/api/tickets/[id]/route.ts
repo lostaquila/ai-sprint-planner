@@ -3,9 +3,9 @@ import { supabase } from "@/lib/supabaseClient";
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = params.id;
+  const { id } = await params;
 
   if (!id || id === "undefined") {
     return NextResponse.json(
