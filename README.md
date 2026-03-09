@@ -1,4 +1,4 @@
-Momentum AI – AI-Powered Sprint Planning for Product Teams 🚀
+## Momentum AI – AI-Powered Sprint Planning for Product Teams 🚀
 
 Momentum AI is an intelligent sprint planning assistant designed to simplify and accelerate the product development workflow. It transforms raw product specs into actionable tickets, helps you plan sprints based on team capacity, and keeps everything organized in a beautiful Kanban-style interface.
 
